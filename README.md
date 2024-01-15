@@ -69,16 +69,18 @@ export password="SFTP-PASSWORD"
 export server="SFTP-HOST"
 ```
 
-Here, I want certain remote directories to be pulled in a certain local directories. First value in the tuple is the remote directory name and the second value is the `type` of the content. This is then used to find the local path using `LOCATION`. Change this as needed for your use-case.
+Here, I want certain remote directories to be pulled in a certain local directories. First value in the tuple is the remote directory name and the second value is the `type` of the content. This is used from  `LOCATION` object which contains the local directory path for the media type. Change this as needed for your use-case.
 
 ```python
-DIRS_TO_WATCH = [('auto', 'tv_shows'), ('completed', 'movies'),
-                 ('tv_completed', 'tv_shows')]
-LOCATION = {
-    "tv_shows": '/data2/tv_shows',
-    "movies": '/data1/plex/movies'
-}
-   
+# Map of media type and local directory path
+LOCATION = {"tv_shows": "/data2/tv_shows", "movies": "/data1/plex/movies"}
+
+# Map of remote directory location and it's corresponding local media location
+DIRS_TO_WATCH = [
+    ("/downloads/auto", LOCATION["tv_shows"]),
+    ("/downloads/completed", LOCATION["movies"]),
+    ("/downloads/tv_completed", LOCATION["tv_shows"]),
+]
 ```
 
 At the end when the entire directory is copied over, the script will remove the directory and move ahead.
