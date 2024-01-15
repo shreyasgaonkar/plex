@@ -4,6 +4,7 @@ import pysftp
 import pysftp.exceptions
 import os
 import time
+from stat import S_ISDIR, S_ISREG
 
 # Disable host key requirement for pysftp for cronjobs
 cnopts = pysftp.CnOpts()
@@ -13,20 +14,26 @@ server = os.environ.get("server")
 username = os.environ.get("username")
 password = os.environ.get("password")
 
-DIRS_TO_WATCH = [
-    ("auto", "tv_shows"),
-    ("completed", "movies"),
-    ("tv_completed", "tv_shows"),
-]
+
+### Global configs
+MAX_RETRIES = 3
+SLEEP_SECONDS = 90
+
+# Map of media type and local directory path
 LOCATION = {"tv_shows": "/data2/tv_shows", "movies": "/data1/plex/movies"}
+
+# Map of remote directory location and it's corresponding local media location
+DIRS_TO_WATCH = [
+    ("/downloads/auto", LOCATION["tv_shows"]),
+    ("/downloads/completed", LOCATION["movies"]),
+    ("/downloads/tv_completed", LOCATION["tv_shows"]),
+]
+
+### End global configs
 
 
 def rm(path, sftp):
-    """Remove remote file or directory"""
-
-    if os.path.isfile(path):
-        sftp.remove(path)
-        return
+    """Remove remote directory"""
 
     files = sftp.listdir(path)
     for f in files:
@@ -38,12 +45,15 @@ def rm(path, sftp):
     sftp.rmdir(path)
 
 
-def download_and_delete_dir(dir_name, local_dir, remote_dir, sftp):
-    print(f"└── Downloading dir: {dir_name}")
+def remove_file(directory_name, file_name, sftp):
+    """Remove remote file"""
+    sftp.remove(os.path.join(directory_name, file_name))
+    return
 
-    if dir_name.endswith(".meta"):
-        print(f"⏭️  Skipping and deleting: {dir_name}")
-        return
+
+def download_and_delete_dir(dir_name, local_dir, remote_dir, sftp):
+    """Download and initiate directory removal"""
+    print(f"└── Downloading dir: {dir_name}")
 
     try:
         sftp.get_r(".", local_dir)
@@ -54,38 +64,55 @@ def download_and_delete_dir(dir_name, local_dir, remote_dir, sftp):
         print(e)
 
 
+def download_and_delete_file(file_name, directory_name, local_dir, sftp):
+    """Download and initiate file removal"""
+    print(f"└── Downloading file: {file_name}")
+
+    if file_name.endswith(".meta"):
+        remove_file(directory_name, file_name, sftp)
+        print(f"⏭️  Skipped and deleted: {file_name}")
+        return
+
+    try:
+        sftp.get_r(".", local_dir)
+        print(f"└── 💾  Copied file: {directory_name}/{file_name} to {local_dir}")
+        # sftp.remove(os.path.join(directory_name, file_name))
+        remove_file(directory_name, file_name, sftp)
+        print(f"└── 🗑️  Deleted dir: {directory_name}")
+    except Exception as e:
+        print(e)
+
+
 def get_data():
+    """Connect to remove server to download files and directories"""
     with pysftp.Connection(
         host=server, username=username, password=password, cnopts=cnopts
     ) as sftp:
-
-        for dir, content_type in DIRS_TO_WATCH:
-
-            remote_dir = f"/downloads/{dir}"
-            local_dir = f"{LOCATION[content_type]}"
-
+        for remote_dir, local_dir in DIRS_TO_WATCH:
             sftp.chdir(remote_dir)
             print(f"Listing dir: {remote_dir}")
-            all_dirs = sftp.listdir()
 
-            for single_dir in all_dirs:
-                download_and_delete_dir(single_dir, local_dir, remote_dir, sftp)
+            for entry in sftp.listdir_attr():
+                mode = entry.st_mode
+                if S_ISDIR(mode):
+                    download_and_delete_dir(entry.filename, local_dir, remote_dir, sftp)
+                elif S_ISREG(mode):
+                    download_and_delete_file(
+                        entry.filename, remote_dir, local_dir, sftp
+                    )
+                    # print(entry.filename + " is file")
 
 
 def main():
-
-    max_retries = 3
-    successful_execution = False
-
-    for _ in range(max_retries):
-        if successful_execution:
-            break
+    """Main function"""
+    for _ in range(MAX_RETRIES):
         try:
             get_data()
-            successful_execution = True
-        except pysftp.exceptions.ConnectionException as exp:
-            print(exp)
-            time.sleep(90)
+            break
+        except pysftp.exceptions.ConnectionException:
+            time.sleep(SLEEP_SECONDS)
+        except Exception as exp:
+            print(f"Unknown exception: {exp}")
 
 
 if __name__ == "__main__":
