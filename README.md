@@ -23,7 +23,7 @@ docker run -d \
   -v /data2/tv_shows:/tv \
   -v /data1/plex/movies:/movies \
   --restart unless-stopped \
-  lscr.io/linuxserver/plex:latest
+  linuxserver/plex:latest
 ```
 
 ### Initial Setup
